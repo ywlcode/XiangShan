@@ -31,6 +31,7 @@ import xiangshan.Redirect
 import xiangshan.RedirectLevel
 import xiangshan.ValidUndirectioned
 import xiangshan.backend.CtrlToFtqIO
+import xiangshan.frontend.BpuPerfInfo
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.BranchPredictionRedirect
 import xiangshan.frontend.ExceptionType
@@ -59,10 +60,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     val fromBackend: CtrlToFtqIO = Flipped(new CtrlToFtqIO)
     val toBackend:   FtqToCtrlIO = new FtqToCtrlIO
 
-    val bpuInfo = new Bundle {
-      val bpRight: UInt = Output(UInt(XLEN.W))
-      val bpWrong: UInt = Output(UInt(XLEN.W))
-    }
+    val bpuInfo = new BpuPerfInfo
 
     // for perf
     val ControlBTBMissBubble: Bool = Output(Bool())

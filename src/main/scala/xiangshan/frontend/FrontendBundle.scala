@@ -41,6 +41,11 @@ import xiangshan.frontend.icache._
 import xiangshan.frontend.instruncache.InstrUncacheReq
 import xiangshan.frontend.instruncache.InstrUncacheResp
 
+class BpuPerfInfo(implicit p: Parameters) extends XSBundle {
+  val bpRight: UInt = UInt(XLEN.W)
+  val bpWrong: UInt = UInt(XLEN.W)
+}
+
 class FrontendTopDownBundle(implicit p: Parameters) extends XSBundle {
   val reasons    = Vec(TopDownCounters.NumStallReasons.id, Bool())
   val stallWidth = UInt(log2Ceil(PredictWidth).W)

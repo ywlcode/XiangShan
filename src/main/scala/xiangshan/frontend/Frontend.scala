@@ -1,31 +1,29 @@
-/***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-*
-*
-* Acknowledgement
-*
-* This implementation is inspired by several key papers:
-* [1] Alex Ramirez, Oliverio J. Santana, Josep L. Larriba-Pey, and Mateo Valero. "[Fetching instruction streams.]
-* (https://doi.org/10.1109/MICRO.2002.1176264)" 35th Annual IEEE/ACM International Symposium on Microarchitecture
-* (MICRO). 2002.
-* [2] Yasuo Ishii, Jaekyu Lee, Krishnendra Nathella, and Dam Sunwoo. "[Rebasing instruction prefetching: An industry
-* perspective.](https://doi.org/10.1109/LCA.2020.3035068)" IEEE Computer Architecture Letters 19.2: 147-150. 2020.
-* [3] Yasuo Ishii, Jaekyu Lee, Krishnendra Nathella, and Dam Sunwoo. "[Re-establishing fetch-directed instruction
-* prefetching: An industry perspective.](https://doi.org/10.1109/ISPASS51385.2021.00034)" 2021 IEEE International
-* Symposium on Performance Analysis of Systems and Software (ISPASS). 2021.
-***************************************************************************************/
+// Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2020-2021 Peng Cheng Laboratory
+//
+// XiangShan is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          https://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+//
+// Acknowledgement
+//
+// This implementation is inspired by several key papers:
+// [1] Alex Ramirez, Oliverio J. Santana, Josep L. Larriba-Pey, and Mateo Valero. "[Fetching instruction streams.]
+// (https://doi.org/10.1109/MICRO.2002.1176264)" 35th Annual IEEE/ACM International Symposium on Microarchitecture
+// (MICRO). 2002.
+// [2] Yasuo Ishii, Jaekyu Lee, Krishnendra Nathella, and Dam Sunwoo. "[Rebasing instruction prefetching: An industry
+// perspective.](https://doi.org/10.1109/LCA.2020.3035068)" IEEE Computer Architecture Letters 19.2: 147-150. 2020.
+// [3] Yasuo Ishii, Jaekyu Lee, Krishnendra Nathella, and Dam Sunwoo. "[Re-establishing fetch-directed instruction
+// prefetching: An industry perspective.](https://doi.org/10.1109/ISPASS51385.2021.00034)" 2021 IEEE International
+// Symposium on Performance Analysis of Systems and Software (ISPASS). 2021.
 
 package xiangshan.frontend
 import chisel3._
@@ -36,34 +34,58 @@ import ftq.Ftq
 import ftq.FtqEntry
 import ftq.FtqPtr
 import org.chipsalliance.cde.config.Parameters
-import utility._
+import utility.ClockGate
+import utility.DelayN
+import utility.DFTResetSignals
+import utility.HasPerfEvents
+import utility.HPerfMonitor
+import utility.ModuleNode
+import utility.PerfEvent
+import utility.ResetGen
+import utility.ResetGenNode
+import utility.XSError
 import utility.mbist.MbistInterface
 import utility.mbist.MbistPipeline
 import utility.sram.SramBroadcastBundle
 import utility.sram.SramHelper
-import xiangshan._
+import xiangshan.CustomCSRCtrlIO
+import xiangshan.DebugOptionsKey
+import xiangshan.FrontendToCtrlIO
+import xiangshan.HasXSParameter
+import xiangshan.L1CacheErrorInfo
+import xiangshan.SfenceBundle
+import xiangshan.SoftIfetchPrefetchBundle
+import xiangshan.TlbCsrBundle
+import xiangshan.XSBundle
 import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.fu.PMP
 import xiangshan.backend.fu.PMPChecker
 import xiangshan.backend.fu.PMPReqBundle
-import xiangshan.cache.mmu._
-import xiangshan.frontend.bpu.Bpu
+import xiangshan.cache.mmu.PTWFilter
+import xiangshan.cache.mmu.PTWRepeaterNB
+import xiangshan.cache.mmu.TLB
+import xiangshan.cache.mmu.TlbPtwIO
+import xiangshan.cache.mmu.VectorTlbPtwIO
 import xiangshan.frontend.bpu.DummyBpu
-import xiangshan.frontend.icache._
-import xiangshan.frontend.ifu._
+import xiangshan.frontend.icache.ICache
+import xiangshan.frontend.ifu.Ifu
 import xiangshan.frontend.instruncache.InstrUncache
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
-  val inner       = LazyModule(new FrontendInlined)
-  lazy val module = new FrontendImp(this)
+
+  val inner:       FrontendInlined = LazyModule(new FrontendInlined)
+  lazy val module: FrontendImp     = new FrontendImp(this)
 }
 
 class FrontendImp(wrapper: Frontend)(implicit p: Parameters) extends LazyModuleImp(wrapper) {
-  val io      = IO(wrapper.inner.module.io.cloneType)
-  val io_perf = IO(wrapper.inner.module.io_perf.cloneType)
+  val io: FrontendInlinedImpIO = IO(wrapper.inner.module.io.cloneType)
   io <> wrapper.inner.module.io
+
+  // FIXME: in new style guide, this should be `perf_io` instead, but now we keep this for compatibility
+  val io_perf: Vec[PerfEvent] = IO(wrapper.inner.module.io_perf.cloneType) // scalastyle:ignore
   io_perf <> wrapper.inner.module.io_perf
+
   if (p(DebugOptionsKey).ResetGen) {
     ResetGen(ResetGenNode(Seq(ModuleNode(wrapper.inner.module))), reset, sim = false, io.dft_reset)
   }
@@ -72,62 +94,72 @@ class FrontendImp(wrapper: Frontend)(implicit p: Parameters) extends LazyModuleI
 class FrontendInlined()(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = true
 
-  val instrUncache = LazyModule(new InstrUncache())
-  val icache       = LazyModule(new ICache())
+  val instrUncache: InstrUncache = LazyModule(new InstrUncache())
+  val icache:       ICache       = LazyModule(new ICache())
 
-  lazy val module = new FrontendInlinedImp(this)
+  lazy val module: FrontendInlinedImp = new FrontendInlinedImp(this)
+}
+
+class FrontendInlinedImpIO(implicit p: Parameters) extends XSBundle {
+  // TODO: re-arrange frontend IOs to make them more sensible
+  class FrontendPerfInfo(implicit p: Parameters) extends XSBundle {
+    val ibufFull: Bool        = Bool()
+    val bpuInfo:  BpuPerfInfo = new BpuPerfInfo
+  }
+
+  class DebugTopDown(implicit p: Parameters) extends XSBundle {
+    val robHeadVaddr: Valid[PrunedAddr] = Valid(PrunedAddr(VAddrBits))
+  }
+
+  val hartId: UInt = Input(UInt(hartIdLen.W))
+  // FIXME: in new style guide, this should be `resetVector` instead, but now we keep this for compatibility
+  val reset_vector: PrunedAddr       = Input(PrunedAddr(PAddrBits)) // scalastyle:ignore
+  val fencei:       Bool             = Input(Bool())
+  val ptw:          TlbPtwIO         = new TlbPtwIO()
+  val backend:      FrontendToCtrlIO = new FrontendToCtrlIO
+  val softPrefetch: Vec[Valid[SoftIfetchPrefetchBundle]] =
+    Vec(backendParams.LduCnt, Flipped(Valid(new SoftIfetchPrefetchBundle)))
+  val sfence:          SfenceBundle            = Input(new SfenceBundle)
+  val tlbCsr:          TlbCsrBundle            = Input(new TlbCsrBundle)
+  val csrCtrl:         CustomCSRCtrlIO         = Input(new CustomCSRCtrlIO)
+  val error:           Valid[L1CacheErrorInfo] = Valid(new L1CacheErrorInfo)
+  val frontendInfo:    FrontendPerfInfo        = Output(new FrontendPerfInfo)
+  val resetInFrontend: Bool                    = Output(Bool())
+  val debugTopDown:    DebugTopDown            = Flipped(new DebugTopDown)
+
+  // dft
+  val dft: Option[SramBroadcastBundle] = Option.when(hasDFT)(Input(new SramBroadcastBundle))
+  // FIXME: in new style guide, this should be `dftReset` instead, but now we keep this for compatibility
+  val dft_reset: Option[DFTResetSignals] = Option.when(hasMbist)(Input(new DFTResetSignals)) // scalastyle:ignore
 }
 
 class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     with HasXSParameter
     with HasPerfEvents {
-  val io = IO(new Bundle() {
-    val hartId       = Input(UInt(hartIdLen.W))
-    val reset_vector = Input(PrunedAddr(PAddrBits))
-    val fencei       = Input(Bool())
-    val ptw          = new TlbPtwIO()
-    val backend      = new FrontendToCtrlIO
-    val softPrefetch = Vec(backendParams.LduCnt, Flipped(Valid(new SoftIfetchPrefetchBundle)))
-    val sfence       = Input(new SfenceBundle)
-    val tlbCsr       = Input(new TlbCsrBundle)
-    val csrCtrl      = Input(new CustomCSRCtrlIO)
-    val error        = ValidIO(new L1CacheErrorInfo)
-    val frontendInfo = new Bundle {
-      val ibufFull = Output(Bool())
-      val bpuInfo = new Bundle {
-        val bpRight = Output(UInt(XLEN.W))
-        val bpWrong = Output(UInt(XLEN.W))
-      }
-    }
-    val resetInFrontend = Output(Bool())
-    val debugTopDown = new Bundle {
-      val robHeadVaddr = Flipped(Valid(PrunedAddr(VAddrBits)))
-    }
-    val dft       = Option.when(hasDFT)(Input(new SramBroadcastBundle))
-    val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
-  })
 
-  // decouped-frontend modules
-  val instrUncache = outer.instrUncache.module
-  val icache       = outer.icache.module
-  val bpu          = Module(new DummyBpu)
-  val ifu          = Module(new Ifu)
-  val ibuffer      = Module(new IBuffer)
-  val ftq          = Module(new Ftq)
+  val io: FrontendInlinedImpIO = IO(new FrontendInlinedImpIO)
+
+  // decoupled-frontend modules
+  private val instrUncache = outer.instrUncache.module
+  private val icache       = outer.icache.module
+  private val bpu          = Module(new DummyBpu)
+  private val ifu          = Module(new Ifu)
+  private val ibuffer      = Module(new IBuffer)
+  private val ftq          = Module(new Ftq)
   ftq.io.reset_vector := io.reset_vector
 
-  val needFlush            = RegNext(io.backend.toFtq.redirect.valid)
-  val FlushControlRedirect = RegNext(io.backend.toFtq.redirect.bits.debugIsCtrl)
-  val FlushMemVioRedirect  = RegNext(io.backend.toFtq.redirect.bits.debugIsMemVio)
-  val FlushControlBTBMiss  = Wire(Bool())
-  val FlushTAGEMiss        = Wire(Bool())
-  val FlushSCMiss          = Wire(Bool())
-  val FlushITTAGEMiss      = Wire(Bool())
-  val FlushRASMiss         = Wire(Bool())
+  private val needFlush            = RegNext(io.backend.toFtq.redirect.valid)
+  private val flushControlRedirect = RegNext(io.backend.toFtq.redirect.bits.debugIsCtrl)
+  private val flushMemVioRedirect  = RegNext(io.backend.toFtq.redirect.bits.debugIsMemVio)
+  private val flushControlBTBMiss  = Wire(Bool())
+  private val flushTAGEMiss        = Wire(Bool())
+  private val flushSCMiss          = Wire(Bool())
+  private val flushITTAGEMiss      = Wire(Bool())
+  private val flushRASMiss         = Wire(Bool())
 
-  val tlbCsr  = DelayN(io.tlbCsr, 2)
-  val csrCtrl = DelayN(io.csrCtrl, 2)
-  val sfence  = RegNext(RegNext(io.sfence))
+  private val tlbCsr  = DelayN(io.tlbCsr, 2)
+  private val csrCtrl = DelayN(io.csrCtrl, 2)
+  private val sfence  = DelayN(io.sfence, 2)
 
   // trigger
   ifu.io.frontendTrigger := csrCtrl.frontend_trigger
@@ -140,40 +172,40 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   bpu.io.resetVector := io.reset_vector
 
   // pmp
-  val PortNumber = ICacheParameters().PortNumber
-  val pmp        = Module(new PMP())
-  val pmp_check  = VecInit(Seq.fill(coreParams.ipmpPortNum)(Module(new PMPChecker(3, sameCycle = true)).io))
+  def PortNumber: Int = coreParams.icacheParameters.PortNumber
+  private val pmp        = Module(new PMP())
+  private val pmpChecker = Seq.fill(coreParams.ipmpPortNum)(Module(new PMPChecker(3, sameCycle = true)))
   pmp.io.distribute_csr := csrCtrl.distribute_csr
-  val pmp_req_vec = Wire(Vec(coreParams.ipmpPortNum, Valid(new PMPReqBundle())))
-  (0 until 2 * PortNumber).foreach(i => pmp_req_vec(i) <> icache.io.pmp(i).req)
-  pmp_req_vec.last <> ifu.io.pmp.req
+  private val pmpReqVec = Wire(Vec(coreParams.ipmpPortNum, Valid(new PMPReqBundle())))
+  (0 until 2 * PortNumber).foreach(i => pmpReqVec(i) <> icache.io.pmp(i).req)
+  pmpReqVec.last <> ifu.io.pmp.req
 
-  for (i <- pmp_check.indices) {
+  for (i <- pmpChecker.indices) {
     if (HasBitmapCheck) {
-      pmp_check(i).apply(tlbCsr.mbmc.CMODE.asBool, tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
+      pmpChecker(i).io.apply(tlbCsr.mbmc.CMODE.asBool, tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmpReqVec(i))
     } else {
-      pmp_check(i).apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
+      pmpChecker(i).io.apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmpReqVec(i))
     }
   }
-  (0 until 2 * PortNumber).foreach(i => icache.io.pmp(i).resp <> pmp_check(i).resp)
-  ifu.io.pmp.resp <> pmp_check.last.resp
+  (0 until 2 * PortNumber).foreach(i => icache.io.pmp(i).resp <> pmpChecker(i).io.resp)
+  ifu.io.pmp.resp <> pmpChecker.last.io.resp
 
-  val itlb =
+  private val itlb =
     Module(new TLB(coreParams.itlbPortNum, nRespDups = 1, Seq.fill(PortNumber)(false) ++ Seq(true), itlbParams))
   itlb.io.requestor.take(PortNumber) zip icache.io.itlb foreach { case (a, b) => a <> b }
   itlb.io.requestor.last <> ifu.io.itlb // mmio may need re-tlb, blocked
   itlb.io.hartId := io.hartId
   itlb.io.base_connect(sfence, tlbCsr)
   itlb.io.flushPipe.foreach(_ := icache.io.itlbFlushPipe)
-  itlb.io.redirect := DontCare // itlb has flushpipe, don't need redirect signal
+  itlb.io.redirect := DontCare // itlb has flushPipe, don't need redirect signal
 
-  val itlb_ptw = Wire(new VectorTlbPtwIO(coreParams.itlbPortNum))
-  itlb_ptw.connect(itlb.io.ptw)
-  val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay, itlb_ptw, sfence, tlbCsr, l2tlbParams.ifilterSize)
-  val itlbRepeater2 =
+  private val itlbPtw = Wire(new VectorTlbPtwIO(coreParams.itlbPortNum))
+  itlbPtw.connect(itlb.io.ptw)
+  private val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay, itlbPtw, sfence, tlbCsr, l2tlbParams.ifilterSize)
+  private val itlbRepeater2 =
     PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, io.ptw, sfence, tlbCsr)
 
-  // ICache-Memblock
+  // ICache-MemBlock
   icache.io.softPrefetchReq <> io.softPrefetch
 
   // wfi (backend-icache, backend-instrUncache)
@@ -214,13 +246,13 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   io.backend.fromIfu := ifu.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
-  val checkPcMem = Reg(Vec(FtqSize, new FtqEntry))
+  private val checkPcMem = Reg(Vec(FtqSize, new FtqEntry))
   when(ftq.io.toBackend.pc_mem_wen) {
     checkPcMem(ftq.io.toBackend.pc_mem_waddr) := ftq.io.toBackend.pc_mem_wdata
   }
 
-  val checkTargetPtr = Wire(Vec(DecodeWidth, new FtqPtr))
-  val checkTarget    = Wire(Vec(DecodeWidth, PrunedAddr(VAddrBits)))
+  private val checkTargetPtr = Wire(Vec(DecodeWidth, new FtqPtr))
+  private val checkTarget    = Wire(Vec(DecodeWidth, PrunedAddr(VAddrBits)))
 
   for (i <- 0 until DecodeWidth) {
     checkTargetPtr(i) := ibuffer.io.out(i).bits.ftqPtr
@@ -232,12 +264,12 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   }
 
   // commented out for this br could be the last instruction in the fetch block
-  def checkNotTakenConsecutive = {
+  def checkNotTakenConsecutive(): Unit = {
     val prevNotTakenValid  = RegInit(0.B)
     val prevNotTakenFtqPtr = Reg(new FtqPtr)
     for (i <- 0 until DecodeWidth - 1) {
-      // for instrs that is not the last, if a not-taken br, the next instr should have the same ftqPtr
-      // for instrs that is the last, record and check next request
+      // for instr that is not the last, if a not-taken br, the next instr should have the same ftqPtr
+      // for instr that is the last, record and check next request
       when(ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr) {
         when(ibuffer.io.out(i + 1).fire) {
           // not last br, check now
@@ -273,12 +305,12 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     }
   }
 
-  def checkTakenNotConsecutive = {
+  def checkTakenNotConsecutive(): Unit = {
     val prevTakenValid  = RegInit(0.B)
     val prevTakenFtqPtr = Reg(new FtqPtr)
     for (i <- 0 until DecodeWidth - 1) {
-      // for instrs that is not the last, if a taken br, the next instr should not have the same ftqPtr
-      // for instrs that is the last, record and check next request
+      // for instr that is not the last, if a taken br, the next instr should not have the same ftqPtr
+      // for instr that is the last, record and check next request
       when(ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr && ibuffer.io.out(i).bits.pred_taken) {
         when(ibuffer.io.out(i + 1).fire) {
           // not last br, check now
@@ -315,7 +347,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     }
   }
 
-  def checkNotTakenPC = {
+  def checkNotTakenPC(): Unit = {
     val prevNotTakenPC    = Reg(PrunedAddr(VAddrBits))
     val prevIsRVC         = Reg(Bool())
     val prevNotTakenValid = RegInit(0.B)
@@ -357,7 +389,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     }
   }
 
-  def checkTakenPC = {
+  def checkTakenPC(): Unit = {
     val prevTakenFtqPtr = Reg(new FtqPtr)
     val prevTakenValid  = RegInit(0.B)
     val prevTakenTarget = Wire(PrunedAddr(VAddrBits))
@@ -396,28 +428,29 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     }
   }
 
-  // checkNotTakenConsecutive
-  checkTakenNotConsecutive
-  checkTakenPC
-  checkNotTakenPC
+  /* *** checks *** */
+  // checkNotTakenConsecutive()
+  checkTakenNotConsecutive()
+  checkTakenPC()
+  checkNotTakenPC()
 
   ifu.io.robCommits <> io.backend.toFtq.rob_commits
 
   ibuffer.io.flush                := needFlush
-  ibuffer.io.ControlRedirect      := FlushControlRedirect
-  ibuffer.io.MemVioRedirect       := FlushMemVioRedirect
-  ibuffer.io.ControlBTBMissBubble := FlushControlBTBMiss
-  ibuffer.io.TAGEMissBubble       := FlushTAGEMiss
-  ibuffer.io.SCMissBubble         := FlushSCMiss
-  ibuffer.io.ITTAGEMissBubble     := FlushITTAGEMiss
-  ibuffer.io.RASMissBubble        := FlushRASMiss
+  ibuffer.io.ControlRedirect      := flushControlRedirect
+  ibuffer.io.MemVioRedirect       := flushMemVioRedirect
+  ibuffer.io.ControlBTBMissBubble := flushControlBTBMiss
+  ibuffer.io.TAGEMissBubble       := flushTAGEMiss
+  ibuffer.io.SCMissBubble         := flushSCMiss
+  ibuffer.io.ITTAGEMissBubble     := flushITTAGEMiss
+  ibuffer.io.RASMissBubble        := flushRASMiss
   ibuffer.io.decodeCanAccept      := io.backend.canAccept
 
-  FlushControlBTBMiss := ftq.io.ControlBTBMissBubble
-  FlushTAGEMiss       := ftq.io.TAGEMissBubble
-  FlushSCMiss         := ftq.io.SCMissBubble
-  FlushITTAGEMiss     := ftq.io.ITTAGEMissBubble
-  FlushRASMiss        := ftq.io.RASMissBubble
+  flushControlBTBMiss := ftq.io.ControlBTBMissBubble
+  flushTAGEMiss       := ftq.io.TAGEMissBubble
+  flushSCMiss         := ftq.io.SCMissBubble
+  flushITTAGEMiss     := ftq.io.ITTAGEMissBubble
+  flushRASMiss        := ftq.io.RASMissBubble
 
   io.backend.cfVec <> ibuffer.io.out
   io.backend.stallReason <> ibuffer.io.stallReason
@@ -435,16 +468,16 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   io.frontendInfo.ibufFull := RegNext(ibuffer.io.full)
   io.resetInFrontend       := reset.asBool
 
-  // PFEvent
-  val pfevent = Module(new PFEvent)
-  pfevent.io.distribute_csr := io.csrCtrl.distribute_csr
-  val csrevents = pfevent.io.hpmevent.take(8)
+  /* *** perfEvents *** */
+  private val pfEvent = Module(new PFEvent)
+  pfEvent.io.distribute_csr := io.csrCtrl.distribute_csr
+  private val csrPerfEvents = pfEvent.io.hpmevent.take(8)
 
-  val perfFromUnits = Seq(ifu, ibuffer, icache, ftq).flatMap(_.getPerfEvents)
-  val perfFromIO    = Seq()
-  val perfBlock     = Seq()
+  private val perfFromUnits = Seq(ifu, ibuffer, icache, ftq).flatMap(_.getPerfEvents)
+  private val perfFromIO    = Seq()
+  private val perfBlock     = Seq()
   // let index = 0 be no event
-  val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromIO ++ perfBlock
+  private val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromIO ++ perfBlock
 
   if (printEventCoding) {
     for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
@@ -452,10 +485,11 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     }
   }
 
-  val allPerfInc          = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
-  override val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
+  private val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
+  override val perfEvents: Seq[(String, UInt)] = HPerfMonitor(csrPerfEvents, allPerfInc).getPerfEvents
   generatePerfEvent()
 
+  /* *** DFT (Design for Testability) *** */
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(Int.MaxValue, "MbistPipeFrontend", hasMbist)
   private val mbistIntf = if (hasMbist) {
     val params = mbistPl.get.nodeParams
@@ -484,7 +518,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
     cg.cgen := false.B
   }
 
-  sigFromSrams.foreach { case sig => sig := DontCare }
+  sigFromSrams.foreach(_ := DontCare)
   sigFromSrams.zip(io.dft).foreach {
     case (sig, dft) =>
       if (hasMbist) {
