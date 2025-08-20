@@ -212,7 +212,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toICache.prefetchReq.bits.req.startVAddr := Mux(
     redirectNext.valid,
     PrunedAddrInit(redirectNext.bits.target),
-    entryQueue(pfPtr(0).value)
+    entryQueue(pfPtr(0).value).startVAddr
   )
   io.toICache.prefetchReq.bits.req.nextCachelineVAddr :=
     io.toICache.prefetchReq.bits.req.startVAddr + (CacheLineSize / 8).U
@@ -225,16 +225,16 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   // TODO: consider BPU bypass
   io.toICache.fetchReq.valid                       := bpuPtr(0) > ifuPtr(0) && !redirect.valid
-  io.toICache.fetchReq.bits.req.startVAddr         := entryQueue(ifuPtr(0).value)
-  io.toICache.fetchReq.bits.req.nextCachelineVAddr := entryQueue(ifuPtr(0).value) + (CacheLineSize / 8).U
+  io.toICache.fetchReq.bits.req.startVAddr         := entryQueue(ifuPtr(0).value).startVAddr
+  io.toICache.fetchReq.bits.req.nextCachelineVAddr := entryQueue(ifuPtr(0).value).startVAddr + (CacheLineSize / 8).U
   io.toICache.fetchReq.bits.req.ftqIdx             := ifuPtr(0)
   io.toICache.fetchReq.bits.isBackendException     := backendException.hasException && backendExceptionPtr === ifuPtr(0)
 
   io.toIfu.req.valid                    := bpuPtr(0) > ifuPtr(0) && !redirect.valid
   io.toIfu.req.bits.fetch(0).valid      := bpuPtr(0) > ifuPtr(0) && !redirect.valid
-  io.toIfu.req.bits.fetch(0).startVAddr := entryQueue(ifuPtr(0).value)
+  io.toIfu.req.bits.fetch(0).startVAddr := entryQueue(ifuPtr(0).value).startVAddr
   io.toIfu.req.bits.fetch(0).nextStartVAddr := MuxCase(
-    entryQueue(ifuPtr(1).value),
+    entryQueue(ifuPtr(1).value).startVAddr,
     Seq(
       (bpuPtr(0) === ifuPtr(0)) -> prediction.bits.target,
       (bpuPtr(0) === ifuPtr(1)) -> prediction.bits.startVAddr
@@ -292,10 +292,12 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
   // Resolve and train BPU
   // --------------------------------------------------------------------------------
+  resolveQueue.io.backendResolve := io.fromBackend.resolve
+
   metaQueue.io.ren   := resolveQueue.io.bpuTrain.valid
   metaQueue.io.raddr := resolveQueue.io.bpuTrain.bits.ftqIdx.value
 
-  io.toBpu.train                 := RegNext(resolveQueue.io.bpuTrain.valid)
+  io.toBpu.train.valid           := RegNext(resolveQueue.io.bpuTrain.valid)
   io.toBpu.train.bits.meta       := metaQueue.io.rdata.meta
   io.toBpu.train.bits.startVAddr := RegEnable(resolveQueue.io.bpuTrain.bits.startVAddr, resolveQueue.io.bpuTrain.valid)
   io.toBpu.train.bits.branches   := RegEnable(resolveQueue.io.bpuTrain.bits.branches, resolveQueue.io.bpuTrain.valid)

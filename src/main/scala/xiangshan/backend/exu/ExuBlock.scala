@@ -58,7 +58,7 @@ class ExuBlockImp(
   if (params.isIntSchd) {
     val bjuExus = exus.filter(_.wrapper.exuParams.hasBrhFu).map(_.wrapper.module)
     assert(bjuExus.size == io.toFrontendBJUResolve.get.size, "bju num is different")
-    val fromBJUResolve = bjuExus.map(_.io.in)
+    val fromBJUResolve = bjuExus.map(_.io.toFrontendBJUResolve.get)
     io.toFrontendBJUResolve.get := fromBJUResolve
   }
   io.I2FWakeupOut.foreach{ x =>

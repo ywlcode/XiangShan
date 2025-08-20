@@ -21,7 +21,7 @@ import xiangshan.frontend.HasFrontendParameters
 
 case class FtqParameters(
     FtqSize:          Int = 64,
-    ResolveQueueSize: Int = 8
+    ResolveQueueSize: Int = 64
 ) {
   // sanity check
   require(isPow2(FtqSize))

@@ -7,6 +7,7 @@ import utility.{SignExt, ZeroExt}
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.fu.{BranchModule, FuConfig, FuncUnit}
 import xiangshan.backend.datapath.DataConfig.VAddrData
+import xiangshan.frontend.PrunedAddrInit
 import xiangshan.{RedirectLevel, SelImm, XSModule}
 
 class AddrAddModule(implicit p: Parameters) extends XSModule {
@@ -69,7 +70,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
       redirect.bits.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(addModule.io.target)
   }
   io.toFrontendBJUResolve.get.valid := io.out.valid
-  io.toFrontendBJUResolve.get.bits.target := addModule.io.target
+  io.toFrontendBJUResolve.get.bits.target := PrunedAddrInit(addModule.io.target)
   io.toFrontendBJUResolve.get.bits.taken := dataModule.io.taken
   io.toFrontendBJUResolve.get.bits.cfiPosition := io.in.bits.ctrl.ftqOffset.get
   io.toFrontendBJUResolve.get.bits.attribute.branchType := io.in.bits.ctrl.preDecode.get.brType

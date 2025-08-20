@@ -18,10 +18,11 @@ package xiangshan.frontend.ftq
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.XSError
 import xiangshan.Resolve
-import xiangshan.frontend.bpu.BpuTrain
+import xiangshan.frontend.bpu.HalfAlignHelper
 
-class ResolveQueue(implicit p: Parameters) extends FtqModule {
+class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelper {
 
   class ResolveQueueIO extends Bundle {
     val backendResolve: Vec[Valid[Resolve]] = Input(Vec(backendParams.BrhCnt, Valid(new Resolve)))
@@ -30,5 +31,64 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule {
 
   val io: ResolveQueueIO = IO(new ResolveQueueIO)
 
-  private val mem = Reg(Vec(ResolveQueueSize, Valid(new ResolveEntry)))
+  private val mem = RegInit(0.U.asTypeOf(Vec(ResolveQueueSize, Valid(new ResolveEntry))))
+
+  private val enqPtr = ResolveQueuePtr(false.B, 0.U)
+  private val deqPtr = ResolveQueuePtr(false.B, 0.U)
+
+  private val hit = io.backendResolve.map { branch =>
+    mem.map(entry => branch.valid && entry.valid && entry.bits.ftqIdx === branch.bits.ftqIdx).reduce(_ || _)
+  }
+  private val hitIndex = io.backendResolve.map { branch =>
+    mem.indexWhere(entry => branch.valid && entry.valid && entry.bits.ftqIdx === branch.bits.ftqIdx)
+  }
+  private val enqIndex = (0 until backendParams.BrhCnt).map { i =>
+    Mux(hit(i), hitIndex(i), (enqPtr + PopCount(hit.take(i))).value)
+  }
+
+  private val newEntryNeeded = PopCount(io.backendResolve.zipWithIndex.map { case (branch, i) =>
+    val hitPrevious = if (i > 0) io.backendResolve.take(i).map(previousBranch =>
+      previousBranch.valid && previousBranch.bits.ftqIdx === branch.bits.ftqIdx
+    ).reduce(_ || _)
+    else false.B
+
+    branch.valid && !hit(i) && !hitPrevious
+  })
+  enqPtr := enqPtr + newEntryNeeded
+
+  io.backendResolve.zipWithIndex.foreach { case (branch, i) =>
+    when(branch.valid) {
+      mem(enqIndex(i)).valid           := true.B
+      mem(enqIndex(i)).bits.ftqIdx     := branch.bits.ftqIdx
+      mem(enqIndex(i)).bits.startVAddr := branch.bits.pc
+
+      val hitPrevious = if (i > 0) PopCount(io.backendResolve.take(i).map(previousBranch =>
+        previousBranch.valid && previousBranch.bits.ftqIdx === branch.bits.ftqIdx
+      )) else 0.U
+      val lastValid  = mem(enqIndex(i)).bits.branches.lastIndexWhere(_.valid)
+      val branchSlot = mem(enqIndex(i)).bits.branches(lastValid + hitPrevious)
+      branchSlot.valid            := true.B
+      branchSlot.bits.target      := branch.bits.target
+      branchSlot.bits.taken       := branch.bits.taken
+      branchSlot.bits.cfiPosition := getAlignedPosition(branch.bits.pc, branch.bits.ftqOffset)._1
+      branchSlot.bits.attribute   := branch.bits.attribute
+      branchSlot.bits.mispredict  := branch.bits.mispredict
+    }
+  }
+
+  private val deqValid = mem(deqPtr.value).valid && !io.backendResolve.map(branch =>
+    branch.valid && branch.bits.ftqIdx === mem(deqPtr.value).bits.ftqIdx
+  ).reduce(_ || _)
+
+  io.bpuTrain.valid := deqValid
+  io.bpuTrain.bits  := mem(deqPtr.value).bits
+
+  when(deqValid) {
+    deqPtr := deqPtr + 1.U
+
+    mem(deqPtr.value).valid := false.B
+    mem(deqPtr.value).bits.branches.foreach(_.valid := false.B)
+  }
+
+  XSError(deqPtr > enqPtr, "Dequeue pointer exceeds enqueue pointer in Resolve Queue")
 }
