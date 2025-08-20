@@ -187,7 +187,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     val commitValid = io.commit.valid
     val commitTaken = io.commit.bits.taken
     val commitTakenPc = Mux(
-      commitValid && io.commit.bits.mispred.asBools.reduce(_ || _),
+      commitValid && io.commit.bits.mispredict,
       io.commit.bits.startVAddr,
       getBranchAddr(io.commit.bits.startVAddr, io.commit.bits.cfiPosition)
     )

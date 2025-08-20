@@ -90,17 +90,16 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val validEntries = distanceBetween(bpuPtr(0), commitPtr(0))
 
   // entryQueue stores predictions made by BPU.
-  private val entryQueue = Reg(Vec(FtqSize, PrunedAddr(VAddrBits)))
-
-  // cfiQueue stores positions of control flow instructions in each request entry.
-  // FIXME: Do we need cfiQueue when backend sends instruction information with commit?
-  private val cfiQueue = Reg(Vec(FtqSize, Valid(UInt(CfiPositionWidth.W))))
+  private val entryQueue = Reg(Vec(FtqSize, new FtqEntry))
 
   // speculationQueue stores speculation information needed by BPU when redirect happens.
   private val speculationQueue = Reg(Vec(FtqSize, new BpuSpeculationMeta))
 
   // metaQueue stores information needed to train BPU.
   private val metaQueue = Module(new MetaQueue)
+
+  // resolveQueue stores branch resolve information from backend.
+  private val resolveQueue = Module(new ResolveQueue)
 
   private val readyToCommit = Wire(Bool())
   private val canCommit     = Wire(Bool())
@@ -161,8 +160,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
   }
 
   when((prediction.fire || bpuS3Redirect) && !redirect.valid) {
-    entryQueue(predictionPtr.value) := prediction.bits.startVAddr
-    cfiQueue(predictionPtr.value)   := prediction.bits.ftqOffset
+    entryQueue(predictionPtr.value).startVAddr := prediction.bits.startVAddr
+    // FIXME: BPU should marks all the CFI identified by it.
+    entryQueue(predictionPtr.value).identifiedCfi := VecInit((0 until FetchBlockInstNum).map(i =>
+      prediction.bits.ftqOffset.valid && i.U === prediction.bits.ftqOffset.bits
+    )).asUInt
   }
 
   speculationQueue(io.fromBpu.s3FtqPtr.value) := io.fromBpu.speculationMeta.bits
@@ -240,7 +242,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   )
   io.toIfu.req.bits.fetch(0).nextCachelineVAddr := io.toIfu.req.bits.fetch(0).startVAddr + (CacheLineSize / 8).U
   io.toIfu.req.bits.fetch(0).ftqIdx             := ifuPtr(0)
-  io.toIfu.req.bits.fetch(0).ftqOffset          := cfiQueue(ifuPtr(0).value)
+  // FIXME: This is wrong if identifiedCfi is more than one
+  io.toIfu.req.bits.fetch(0).ftqOffset.valid := entryQueue(ifuPtr(0).value).identifiedCfi.orR
+  io.toIfu.req.bits.fetch(0).ftqOffset.bits  := PriorityEncoder(entryQueue(ifuPtr(0).value).identifiedCfi)
 
   io.toIfu.req.bits.fetch(1) := 0.U.asTypeOf(new FetchRequestBundle)
   // --------------------------------------------------------------------------------
@@ -286,6 +290,17 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.redirectFromIFU               := ifuRedirect.valid
 
   // --------------------------------------------------------------------------------
+  // Resolve and train BPU
+  // --------------------------------------------------------------------------------
+  metaQueue.io.ren   := resolveQueue.io.bpuTrain.valid
+  metaQueue.io.raddr := resolveQueue.io.bpuTrain.bits.ftqIdx.value
+
+  io.toBpu.train                 := RegNext(resolveQueue.io.bpuTrain.valid)
+  io.toBpu.train.bits.meta       := metaQueue.io.rdata.meta
+  io.toBpu.train.bits.startVAddr := RegEnable(resolveQueue.io.bpuTrain.bits.startVAddr, resolveQueue.io.bpuTrain.valid)
+  io.toBpu.train.bits.branches   := RegEnable(resolveQueue.io.bpuTrain.bits.branches, resolveQueue.io.bpuTrain.valid)
+
+  // --------------------------------------------------------------------------------
   // Commit and train BPU
   // --------------------------------------------------------------------------------
   // TODO: frontend does not need this many rob commit channels
@@ -310,12 +325,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
   when(canCommit) {
     commitPtr := commitPtr + 1.U
   }
-
-  // TODO: Wrap metaQueue as other queues
-  metaQueue.io.ren   := readyToCommit
-  metaQueue.io.raddr := commitPtr(0).value
-
-  io.toBpu.train := DontCare
 
   // --------------------------------------------------------------------------------
   // MMIO fetch

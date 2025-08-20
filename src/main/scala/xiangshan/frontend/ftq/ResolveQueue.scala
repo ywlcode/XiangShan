@@ -17,17 +17,18 @@ package xiangshan.frontend.ftq
 
 import chisel3._
 import chisel3.util._
-import xiangshan.frontend.HasFrontendParameters
+import org.chipsalliance.cde.config.Parameters
+import xiangshan.Resolve
+import xiangshan.frontend.bpu.BpuTrain
 
-case class FtqParameters(
-    FtqSize:          Int = 64,
-    ResolveQueueSize: Int = 8
-) {
-  // sanity check
-  require(isPow2(FtqSize))
-}
+class ResolveQueue(implicit p: Parameters) extends FtqModule {
 
-trait HasFtqParameters extends HasFrontendParameters {
-  def ftqParameters:    FtqParameters = frontendParameters.ftqParameters
-  def ResolveQueueSize: Int           = ftqParameters.ResolveQueueSize
+  class ResolveQueueIO extends Bundle {
+    val backendResolve: Vec[Valid[Resolve]] = Input(Vec(3, Valid(new Resolve))) // FIXME: Should be BJU number
+    val bpuTrain:       Valid[ResolveEntry] = Output(Valid(new ResolveEntry))
+  }
+
+  val io: ResolveQueueIO = IO(new ResolveQueueIO)
+
+  private val mem = Reg(Vec(ResolveQueueSize, Valid(new ResolveEntry)))
 }
