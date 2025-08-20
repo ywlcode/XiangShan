@@ -68,5 +68,12 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
       redirect.bits.backendIPF := io.instrAddrTransType.get.checkPageFault(addModule.io.target)
       redirect.bits.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(addModule.io.target)
   }
+  io.toFrontendBJUResolve.get.valid := io.out.valid
+  io.toFrontendBJUResolve.get.bits.target := addModule.io.target
+  io.toFrontendBJUResolve.get.bits.taken := dataModule.io.taken
+  io.toFrontendBJUResolve.get.bits.cfiPosition := io.in.bits.ctrl.ftqOffset.get
+  io.toFrontendBJUResolve.get.bits.attribute.branchType := io.in.bits.ctrl.preDecode.get.brType
+  io.toFrontendBJUResolve.get.bits.attribute.rasAction := 0.U
+  io.toFrontendBJUResolve.get.bits.mispredict := isMisPred
   connect0LatencyCtrlSingal
 }

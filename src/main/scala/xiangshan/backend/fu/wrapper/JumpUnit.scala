@@ -5,6 +5,7 @@ import chisel3._
 import utility.{SignExt, ZeroExt}
 import xiangshan.RedirectLevel
 import xiangshan.backend.fu.{FuConfig, FuncUnit, JumpDataModule, PipedFuncUnit}
+import xiangshan.JumpOpType
 import xiangshan.backend.datapath.DataConfig.VAddrData
 
 
@@ -56,5 +57,12 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   io.in.ready := io.out.ready
   io.out.valid := io.in.valid
   io.out.bits.res.data := jumpDataModule.io.result
+  io.toFrontendBJUResolve.get.valid := io.out.valid && !JumpOpType.jumpOpisAuipc(func)
+  io.toFrontendBJUResolve.get.bits.target := jumpDataModule.io.target
+  io.toFrontendBJUResolve.get.bits.taken := true.B
+  io.toFrontendBJUResolve.get.bits.cfiPosition := io.in.bits.ctrl.ftqOffset.get
+  io.toFrontendBJUResolve.get.bits.attribute.branchType := io.in.bits.ctrl.preDecode.get.brType
+  io.toFrontendBJUResolve.get.bits.attribute.rasAction :=  0.U
+  io.toFrontendBJUResolve.get.bits.mispredict := isMisPred
   connect0LatencyCtrlSingal
 }
