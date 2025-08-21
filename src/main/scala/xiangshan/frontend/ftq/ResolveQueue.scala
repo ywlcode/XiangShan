@@ -33,8 +33,8 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
 
   private val mem = RegInit(0.U.asTypeOf(Vec(ResolveQueueSize, Valid(new ResolveEntry))))
 
-  private val enqPtr = ResolveQueuePtr(false.B, 0.U)
-  private val deqPtr = ResolveQueuePtr(false.B, 0.U)
+  private val enqPtr = RegInit(ResolveQueuePtr(false.B, 0.U))
+  private val deqPtr = RegInit(ResolveQueuePtr(false.B, 0.U))
 
   private val hit = io.backendResolve.map { branch =>
     mem.map(entry => branch.valid && entry.valid && entry.bits.ftqIdx === branch.bits.ftqIdx).reduce(_ || _)
@@ -64,7 +64,8 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
 
       val hitPrevious = if (i > 0) PopCount(io.backendResolve.take(i).map(previousBranch =>
         previousBranch.valid && previousBranch.bits.ftqIdx === branch.bits.ftqIdx
-      )) else 0.U
+      ))
+      else 0.U
       val lastValid  = mem(enqIndex(i)).bits.branches.lastIndexWhere(_.valid)
       val branchSlot = mem(enqIndex(i)).bits.branches(lastValid + hitPrevious)
       branchSlot.valid            := true.B
