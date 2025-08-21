@@ -100,7 +100,7 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val csrin = OptionWrapper(cfg.isCsr, new CSRInput)
   val csrio = OptionWrapper(cfg.isCsr, new CSRFileIO)
   val csrToDecode = OptionWrapper(cfg.isCsr, Output(new CSRToDecode))
-  val toFrontendBJUResolve = OptionWrapper(cfg.isBrh || cfg.isJmp, Output(Valid(new BranchInfo)))
+  val toFrontendBJUResolve = OptionWrapper(cfg.isBrh || cfg.isJmp, Output(Valid(new Resolve)))
   val fenceio = OptionWrapper(cfg.isFence, new FenceIO)
   val frm = OptionWrapper(cfg.needSrcFrm, Input(UInt(3.W)))
   val vxrm = OptionWrapper(cfg.needSrcVxrm, Input(UInt(2.W)))

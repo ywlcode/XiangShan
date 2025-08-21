@@ -401,7 +401,8 @@ class ExeUnitImp(
   io.toFrontendBJUResolve.foreach{ case resolve => {
     val bjus = funcUnits.filter(x => x.cfg.isJmp || x.cfg.isBrh)
     val resolveVec = VecInit(bjus.map(_.io.toFrontendBJUResolve.get))
-    resolve := resolveVec
+    resolve.valid := resolveVec.map(_.valid).reduce(_ || _)
+    resolve.bits := Mux1H(resolveVec.map(_.valid), resolveVec.map(_.bits))
   }}
   io.csrio.foreach(exuio => funcUnits.foreach(fu => fu.io.csrio.foreach{
     fuio =>
