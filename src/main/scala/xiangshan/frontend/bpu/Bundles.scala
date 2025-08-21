@@ -152,6 +152,19 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
   val mispred:     UInt            = UInt(PredictWidth.W)
 }
 
+class BpuFastTrain(implicit p: Parameters) extends Prediction { // use s3 prediction to train s1 predictors
+  // add startVAddr to Prediction
+  val startVAddr: PrunedAddr = PrunedAddr(VAddrBits)
+
+  def fromStage(pc: PrunedAddr, prediction: Prediction): Unit = {
+    this.startVAddr  := pc
+    this.taken       := prediction.taken
+    this.cfiPosition := prediction.cfiPosition
+    this.target      := prediction.target
+    this.attribute   := prediction.attribute
+  }
+}
+
 // metadata for redirect (e.g. speculative state recovery) & training (e.g. rasPtr, phr)
 class BpuSpeculationMeta(implicit p: Parameters) extends BpuBundle {
   val phrHistPtr: PhrPtr          = new PhrPtr

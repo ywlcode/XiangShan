@@ -125,6 +125,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     p.io.startVAddr := s0_pc
     p.io.stageCtrl  := stageCtrl
     p.io.train      := train
+    p.io.fastTrain.fromStage(s3_pc, s3_prediction)
   }
 
   /* *** predictor specific inputs *** */

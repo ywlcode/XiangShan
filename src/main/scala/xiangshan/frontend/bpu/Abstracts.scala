@@ -37,8 +37,10 @@ abstract class BasePredictorIO(implicit p: Parameters) extends BpuBundle {
   val stageCtrl: StageCtrl = Input(new StageCtrl)
   // predict request
   val startVAddr: PrunedAddr = Input(PrunedAddr(VAddrBits))
-  // train
+  // train: use resolved branch to train bpu
   val train: Valid[BpuTrain] = Input(Valid(new BpuTrain))
+  // fast train: use bpu s3 prediction to train s1 predictors
+  val fastTrain: Valid[BpuFastTrain] = Input(Valid(new BpuFastTrain))
 }
 
 // The abstract class is used to abstract the setIdx and tag from write requests for updating write buffer entries
