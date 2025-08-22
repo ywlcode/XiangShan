@@ -44,6 +44,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
   private val banks     = Seq.fill(NumBanks)(Module(new AheadBtbBank))
   private val replacers = Seq.fill(NumBanks)(Module(new AheadBtbReplacer))
 
+  io.resetDone := banks.map(_.io.readReq.ready).reduce(_ && _)
+
   private val takenCounter = Reg(Vec(NumBanks, Vec(NumSets, Vec(NumWays, new SaturateCounter(TakenCounterWidth)))))
 
   // TODO: write ctr bypass to read
@@ -63,7 +65,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers with B
   private val redirectValid   = io.redirectValid
   private val overrideValid   = io.overrideValid
 
-  s0_fire := predictReqValid && banks.map(_.io.readReq.ready).reduce(_ && _)
+  s0_fire := predictReqValid
   s1_fire := s1_valid && s2_ready && predictReqValid
   s2_fire := s2_valid
 
