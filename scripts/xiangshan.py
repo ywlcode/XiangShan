@@ -368,9 +368,11 @@ class XiangShan(object):
         return misc_tests
     
     def __get_ci_rvhtest(self, name=None):
-        base_dir = "/nfs/home/share/ci-workloads/H-extension-tests"
+        # base_dir = "/nfs/home/share/ci-workloads/H-extension-tests"
+        base_dir = "/nfs/home/youzhaoyang/ready-to-run/H-extension-tests"
         workloads = [
             "riscv-hyp-tests/rvh_test.bin",
+            "riscv-hyp-tests/rvh_test_xie.bin",
             "xvisor_wboxtest/checkpoint.gz",
             "pointer-masking-test/M_HS_test/rvh_test.bin",
             "pointer-masking-test/U_test/hint_UMode_hupmm2/rvh_test.bin",
@@ -686,7 +688,7 @@ if __name__ == "__main__":
     parser.add_argument('--issue', nargs='?', type=str, help='CHI issue')
     # emu arguments
     parser.add_argument('--numa', action='store_true', help='use numactl')
-    parser.add_argument('--diff', nargs='?', default="./ready-to-run/riscv64-nemu-interpreter-so", type=str, help='nemu so')
+    parser.add_argument('--diff', nargs='?', default="/nfs/home/share/youzhaoyang/NEMU/build/riscv64-nemu-interpreter-so", type=str, help='nemu so')
     parser.add_argument('--max-instr', nargs='?', type=int, help='max instr')
     parser.add_argument('--disable-fork', action='store_true', help='disable lightSSS')
     parser.add_argument('--no-diff', action='store_true', help='disable difftest')
