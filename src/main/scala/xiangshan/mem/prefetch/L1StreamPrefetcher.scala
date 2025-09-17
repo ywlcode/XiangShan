@@ -334,7 +334,7 @@ class StreamBitVectorArray(val CELL_SIZE: Int)(implicit p: Parameters) extends X
   val s1_region_tag = RegEnable(s0_region_tag, s0_valid)
   val s1_region_bits = RegEnable(s0_region_bits, s0_valid)
   val s1_access_vec = if (CELL_SIZE == 8)
-                        RegEnable(s0_access_vec << (s0_region_bits & (~(7.U))), s0_valid)
+                        RegEnable(Mux(s0_region_bits(3), Cat(s0_access_vec, Fill(8, 0.U)), Cat(Fill(8, 0.U), s0_access_vec)), s0_valid)
                       else
                         RegEnable(UIntToOH(s0_region_bits), s0_valid)
   val s1_alloc = s1_valid && !s1_hit
