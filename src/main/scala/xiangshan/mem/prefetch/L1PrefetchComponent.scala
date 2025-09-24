@@ -874,7 +874,8 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   val stride_train_filter = Module(new TrainFilter(STRIDE_FILTER_SIZE, "stride"))
   val stride_meta_array = Module(new StrideMetaArray)
   val stream_train_filter = Module(new TrainFilter(STREAM_FILTER_SIZE, "stream"))
-  val stream_bit_vec_array = Module(new StreamBitVectorArray(CELL_SIZE = 64))
+  val stream_array_8 = Module(new StreamBitVectorArray(CELL_SIZE = 8))
+  val stream_array_64 = Module(new StreamBitVectorArray(CELL_SIZE = 64))
   val pf_queue_filter = Module(new MutiLevelPrefetchFilter)
 
   // for now, if the stream is disabled, train and prefetch process will continue, without sending out and reqs
@@ -899,31 +900,47 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   stride_train_filter.io.enable := enable
   stride_train_filter.io.flush := flush
 
-  stream_bit_vec_array.io.enable := enable
-  stream_bit_vec_array.io.flush := flush
-  stream_bit_vec_array.io.dynamic_depth := pf_ctrl.dynamic_depth
-  stream_bit_vec_array.io.train_req <> stream_train_filter.io.train_req
+  stream_array_8.io.enable := enable
+  stream_array_8.io.flush := flush
+  stream_array_8.io.dynamic_depth := pf_ctrl.dynamic_depth
+
+  stream_array_64.io.enable := enable
+  stream_array_64.io.flush := flush
+  stream_array_64.io.dynamic_depth := pf_ctrl.dynamic_depth
+
+  stream_array_8.io.train_req.bits := stream_train_filter.io.train_req.bits
+  stream_array_64.io.train_req.bits := stream_train_filter.io.train_req.bits
+  stream_array_8.io.train_req.valid := stream_train_filter.io.train_req.valid && stream_array_64.io.train_req.ready
+  stream_array_64.io.train_req.valid := stream_train_filter.io.train_req.valid && stream_array_8.io.train_req.ready
+  stream_train_filter.io.train_req.ready := stream_array_8.io.train_req.ready && stream_array_64.io.train_req.ready
 
   stride_meta_array.io.enable := enable
   stride_meta_array.io.flush := flush
   stride_meta_array.io.dynamic_depth := 0.U
   stride_meta_array.io.train_req <> stride_train_filter.io.train_req
-  stride_meta_array.io.stream_lookup_req <> stream_bit_vec_array.io.stream_lookup_req
-  stride_meta_array.io.stream_lookup_resp <> stream_bit_vec_array.io.stream_lookup_resp
+  stream_array_8.io.stream_lookup_req := stride_meta_array.io.stream_lookup_req
+  stream_array_64.io.stream_lookup_req := stride_meta_array.io.stream_lookup_req
+  stride_meta_array.io.stream_lookup_resp := stream_array_8.io.stream_lookup_resp | stream_array_64.io.stream_lookup_resp
 
-  // stream has higher priority than stride
-  pf_queue_filter.io.l1_prefetch_req.valid := stream_bit_vec_array.io.l1_prefetch_req.valid || stride_meta_array.io.l1_prefetch_req.valid
+  // priority: stream 8 -> stream 64 -> stride
+  pf_queue_filter.io.l1_prefetch_req.valid := stream_array_8.io.l1_prefetch_req.valid || stream_array_64.io.l1_prefetch_req.valid || stride_meta_array.io.l1_prefetch_req.valid
   pf_queue_filter.io.l1_prefetch_req.bits := Mux(
-    stream_bit_vec_array.io.l1_prefetch_req.valid,
-    stream_bit_vec_array.io.l1_prefetch_req.bits,
-    stride_meta_array.io.l1_prefetch_req.bits
+    stream_array_8.io.l1_prefetch_req.valid,
+    stream_array_8.io.l1_prefetch_req.bits,
+    Mux(stream_array_64.io.l1_prefetch_req.valid,
+      stream_array_64.io.l1_prefetch_req.bits,
+      stride_meta_array.io.l1_prefetch_req.bits
+    )
   )
 
-  pf_queue_filter.io.l2_l3_prefetch_req.valid := stream_bit_vec_array.io.l2_l3_prefetch_req.valid || stride_meta_array.io.l2_l3_prefetch_req.valid
+  pf_queue_filter.io.l2_l3_prefetch_req.valid := stream_array_8.io.l2_l3_prefetch_req.valid || stream_array_64.io.l2_l3_prefetch_req.valid || stride_meta_array.io.l2_l3_prefetch_req.valid
   pf_queue_filter.io.l2_l3_prefetch_req.bits := Mux(
-    stream_bit_vec_array.io.l2_l3_prefetch_req.valid,
-    stream_bit_vec_array.io.l2_l3_prefetch_req.bits,
-    stride_meta_array.io.l2_l3_prefetch_req.bits
+    stream_array_8.io.l2_l3_prefetch_req.valid,
+    stream_array_8.io.l2_l3_prefetch_req.bits,
+    Mux(stream_array_64.io.l2_l3_prefetch_req.valid,
+      stream_array_64.io.l2_l3_prefetch_req.bits,
+      stride_meta_array.io.l2_l3_prefetch_req.bits
+    )
   )
 
   io.l1_req.valid := pf_queue_filter.io.l1_req.valid && enable && pf_ctrl.enable
