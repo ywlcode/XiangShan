@@ -350,7 +350,7 @@ class StreamBitVectorArray(val CELL_SIZE: Int)(implicit p: Parameters) extends X
   // If use strict triggering mode, the stream prefetcher will only trigger prefetching
   // under **cache miss or prefetch hit stream**, but will still perform training on the entire memory access trace.
   val s1_can_trigger = Mux(strict_trigger_const.orR, s1_miss || s1_pfHit, true.B)
-  val s1_can_send_pf = Mux(s1_update, !((array(s1_index).bit_vec & s1_access_vec).orR), true.B) && s1_can_trigger
+  val s1_can_send_pf = Mux(s1_update, ((~array(s1_index).bit_vec) & s1_access_vec).orR, true.B) && s1_can_trigger
   s0_can_accept := !(s1_valid && (unit_hash_tag(s1_region_tag) === unit_hash_tag(s0_region_tag)))
 
   when(s1_alloc) {
