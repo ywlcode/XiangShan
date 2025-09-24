@@ -155,6 +155,7 @@ object Bundles {
       res.pc := this.uop.pc
       res.miss := this.miss
       res.pfHitStream := isFromStream(this.meta_prefetch)
+      res.access_vec := UIntToOH(this.vaddr(5, 3))
       res
     }
   }
