@@ -115,6 +115,7 @@ class StreamBitVectorBundle(val CELL_SIZE: Int)(implicit p: Parameters) extends 
   // cnt can be optimized
   val cnt = UInt((log2Up(BIT_VEC_WITDH) + 1).W)
   val decr_mode = Bool()
+  val hasSent = Bool()
 
   // debug usage
   val trigger_full_va = UInt(VAddrBits.W)
@@ -126,6 +127,7 @@ class StreamBitVectorBundle(val CELL_SIZE: Int)(implicit p: Parameters) extends 
     cnt := 0.U
     decr_mode := INIT_DEC_MODE.B
     trigger_full_va := 0xdeadbeefL.U
+    hasSent := false.B
   }
 
   def tag_match(valid1: Bool, valid2: Bool, new_tag: UInt): Bool = {
@@ -143,6 +145,7 @@ class StreamBitVectorBundle(val CELL_SIZE: Int)(implicit p: Parameters) extends 
     }else {
       decr_mode := INIT_DEC_MODE.B
     }
+    hasSent := Mux(alloc_active, true.B, false.B)
   }
 
   def update(update_bit_vec: UInt, update_active: Bool) = {
@@ -152,9 +155,11 @@ class StreamBitVectorBundle(val CELL_SIZE: Int)(implicit p: Parameters) extends 
     cnt := cnt_next
     when(cnt_next >= ACTIVE_THRESHOLD.U) {
       active := true.B
+      hasSent := true.B
     }
     when(update_active) {
       active := true.B
+      hasSent := true.B
     }
 
     assert(cnt <= BIT_VEC_WITDH.U, "cnt should always less than bit vector size")
@@ -257,6 +262,7 @@ class StreamBitVectorArray(val CELL_SIZE: Int)(implicit p: Parameters) extends X
   val s0_minus_one_hit = Cat(s0_region_tag_minus_one_match_vec).orR
   val s0_hit_vec = VecInit(s0_region_tag_match_vec).asUInt
   val s0_index = Mux(s0_hit, OHToUInt(s0_hit_vec), replacement.way)
+  val s0_hasSent = Mux(s0_hit, array(s0_index).hasSent, false.B)
   val s0_plus_one_index = OHToUInt(VecInit(s0_region_tag_plus_one_match_vec).asUInt)
   val s0_minus_one_index = OHToUInt(VecInit(s0_region_tag_minus_one_match_vec).asUInt)
   io.train_req.ready := s0_can_accept
@@ -337,6 +343,7 @@ class StreamBitVectorArray(val CELL_SIZE: Int)(implicit p: Parameters) extends X
                         RegEnable(Mux(s0_region_bits(3), Cat(s0_access_vec, Fill(8, 0.U)), Cat(Fill(8, 0.U), s0_access_vec)), s0_valid)
                       else
                         RegEnable(UIntToOH(s0_region_bits), s0_valid)
+  val s1_hasSent = RegEnable(s0_hasSent, s0_valid)
   val s1_alloc = s1_valid && !s1_hit
   val s1_update = s1_valid && s1_hit
   val s1_pf_l1_incr_vaddr = Cat(unit_to_cell_addr(s1_region_tag, s1_region_bits) + io.dynamic_depth, 0.U(CELL_OFFSET.W))
@@ -396,7 +403,11 @@ class StreamBitVectorArray(val CELL_SIZE: Int)(implicit p: Parameters) extends X
   val s2_l1_vaddr = Mux(s2_decr_mode, s2_pf_l1_decr_vaddr, s2_pf_l1_incr_vaddr)
   val s2_l2_vaddr = Mux(s2_decr_mode, s2_pf_l2_decr_vaddr, s2_pf_l2_incr_vaddr)
   val s2_l3_vaddr = Mux(s2_decr_mode, s2_pf_l3_decr_vaddr, s2_pf_l3_incr_vaddr)
-  val s2_will_send_pf = s2_valid && s2_active && s2_can_send_pf
+  val s2_hasSent = RegEnable(s1_hasSent, s1_valid)
+  val s2_will_send_pf = if (CELL_SIZE == 8) 
+                          s2_valid && s2_active && s2_can_send_pf && !s2_hasSent
+                        else
+                          s2_valid && s2_active && s2_can_send_pf
   val s2_pf_req_valid = s2_will_send_pf && io.enable
   val s2_pf_l1_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
     valid = s2_valid,
